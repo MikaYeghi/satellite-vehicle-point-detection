@@ -29,12 +29,7 @@ INPUT:
   MAX_SIZE_TRAIN: 1333
   MIN_SIZE_TEST: 800
   MIN_SIZE_TRAIN:
-  - 640
-  - 672
-  - 704
-  - 736
-  - 768
-  - 800
+  - 384
   MIN_SIZE_TRAIN_SAMPLING: choice
   RANDOM_FLIP: horizontal
 MODEL:
