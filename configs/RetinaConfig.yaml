@@ -51,6 +51,7 @@ MODEL:
   FPN:
     FUSE_TYPE: sum
     IN_FEATURES:
+    - res2
     - res3
     - res4
     - res5
@@ -90,6 +91,7 @@ MODEL:
     NORM: FrozenBN
     NUM_GROUPS: 1
     OUT_FEATURES:
+    - res2
     - res3
     - res4
     - res5
@@ -108,6 +110,7 @@ MODEL:
     FOCAL_LOSS_ALPHA: 0.25
     FOCAL_LOSS_GAMMA: 2.0
     IN_FEATURES:
+    - p2
     - p3
     - p4
     - p5
