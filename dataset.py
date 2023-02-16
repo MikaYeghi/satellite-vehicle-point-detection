@@ -1,7 +1,6 @@
 import os
 import json
 import numpy as np
-from tqdm import tqdm
 import copy
 import cv2
 import torch
@@ -33,7 +32,7 @@ def register_LINZ(data_path, mode, debug_on=False):
     dataset_dicts = [None for _ in range(len(annotations_list))]
     
     # Loop through the images
-    for idx, annotation_file in enumerate(tqdm(annotations_list)):
+    for idx, annotation_file in enumerate(annotations_list):
         record = {}
         
         # Record preliminary information about the image
@@ -75,4 +74,4 @@ def setup_dataset(data_path, debug_on=False):
         DatasetCatalog.register("LINZ_" + mode, lambda mode_=mode : register_LINZ(data_path, mode_, debug_on))
         
         # Update the metadata
-        MetadataCatalog.get("LINZ_" + mode).set(thing_classes=["vehicle"])
+        MetadataCatalog.get("LINZ_" + mode).set(thing_classes=["vehicle"], evaluator_type="coco")

@@ -54,6 +54,8 @@ from dataset import setup_dataset
 
 logger = logging.getLogger("detectron2")
 
+import pdb
+
 
 def get_evaluator(cfg, dataset_name, output_folder=None):
     """
@@ -203,7 +205,7 @@ def main(args):
         )
 
     # Setup the dataset before training
-    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m"
+    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-debug"
     setup_dataset(data_path)
     
     do_train(cfg, model, resume=args.resume)
