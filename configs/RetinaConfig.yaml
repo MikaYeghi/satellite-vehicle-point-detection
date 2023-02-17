@@ -101,7 +101,7 @@ MODEL:
     STRIDE_IN_1X1: true
     WIDTH_PER_GROUP: 64
   RETINANET:
-    BBOX_REG_LOSS_TYPE: smooth_l1
+    BBOX_REG_LOSS_TYPE: smooth_l1_point
     BBOX_REG_WEIGHTS:
     - 1.0
     - 1.0
