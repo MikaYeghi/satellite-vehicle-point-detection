@@ -95,12 +95,12 @@ class COCOPointEvaluator(DatasetEvaluator):
             )
             distances = torch.cdist(gt_locations, pred_locations)
             
-            # Threshold the distances
-            distances = (distances < self.accept_radius)
+            # Find the closest predictions
+            idxs = torch.argmin(distances, dim=1)
+            distances = torch.gather(distances, 1, idxs.unsqueeze(1))
             
             # Get TP indices
-            n_TP_per_pred = torch.sum(distances, dim=0)
-            TP_idxs = torch.where(n_TP_per_pred >= 1)[0]
+            TP_idxs = torch.where(distances <= self.accept_radius)[0]
             
             # Record TPs
             for j in range(len(pred_data['instances'])):
