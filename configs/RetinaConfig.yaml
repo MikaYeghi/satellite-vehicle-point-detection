@@ -60,7 +60,7 @@ MODEL:
   KEYPOINT_ON: false
   LOAD_PROPOSALS: false
   MASK_ON: false
-  META_ARCHITECTURE: RetinaNet
+  META_ARCHITECTURE: RetinaNetPoint
   PANOPTIC_FPN:
     COMBINE:
       ENABLED: true
