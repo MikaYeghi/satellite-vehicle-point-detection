@@ -74,4 +74,4 @@ def setup_dataset(data_path, debug_on=False):
         DatasetCatalog.register("LINZ_" + mode, lambda mode_=mode : register_LINZ(data_path, mode_, debug_on))
         
         # Update the metadata
-        MetadataCatalog.get("LINZ_" + mode).set(thing_classes=["vehicle"], evaluator_type="coco")
+        MetadataCatalog.get("LINZ_" + mode).set(thing_classes=["vehicle"], evaluator_type="coco_point")

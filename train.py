@@ -51,6 +51,8 @@ from detectron2.solver import build_lr_scheduler, build_optimizer
 from detectron2.utils.events import EventStorage
 
 from dataset import setup_dataset
+from model_zoo.RetinaNetPoint import RetinaNetPoint
+from evaluation.COCOPointEvaluator import COCOPointEvaluator
 
 logger = logging.getLogger("detectron2")
 
@@ -76,6 +78,8 @@ def get_evaluator(cfg, dataset_name, output_folder=None):
                 output_dir=output_folder,
             )
         )
+    if evaluator_type in ["coco_point"]:
+        evaluator_list.append(COCOPointEvaluator(dataset_name, output_dir=output_folder))
     if evaluator_type in ["coco", "coco_panoptic_seg"]:
         evaluator_list.append(COCOEvaluator(dataset_name, output_dir=output_folder))
     if evaluator_type == "coco_panoptic_seg":
@@ -205,7 +209,7 @@ def main(args):
         )
 
     # Setup the dataset before training
-    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-reduced"
+    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-debug"
     setup_dataset(data_path)
     
     do_train(cfg, model, resume=args.resume)
