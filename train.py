@@ -205,7 +205,7 @@ def main(args):
         )
 
     # Setup the dataset before training
-    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-debug"
+    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-reduced"
     setup_dataset(data_path)
     
     do_train(cfg, model, resume=args.resume)
