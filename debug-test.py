@@ -17,7 +17,10 @@ import matplotlib.pyplot as plt
 
 cfg = get_cfg()
 cfg.merge_from_file("output/config.yaml")
-cfg.merge_from_list(["MODEL.WEIGHTS", "output/model_final.pth"])
+cfg.merge_from_list([
+    "MODEL.WEIGHTS", "output/model_final.pth",
+    "MODEL.RETINANET.SCORE_THRESH_TEST", "0.7"
+])
 
 predictor = DefaultPredictor(cfg)
 
@@ -27,7 +30,6 @@ plt.figure(figsize=(15,7.5))
 plt.imshow(im[..., ::-1])
 
 outputs = predictor(im[..., ::-1])
-pdb.set_trace()
 
 v = Visualizer(im[:, :, ::-1], MetadataCatalog.get(cfg.DATASETS.TRAIN[0]), scale=1.2)
 out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
