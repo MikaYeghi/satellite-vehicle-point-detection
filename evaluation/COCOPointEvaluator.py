@@ -1,6 +1,8 @@
 import torch
+import itertools
 import numpy as np
 import pandas as pd
+import detectron2.utils.comm as comm
 from detectron2.data import DatasetCatalog
 from detectron2.evaluation import DatasetEvaluator
 from detectron2.evaluation.coco_evaluation import instances_to_coco_json
@@ -51,6 +53,15 @@ class COCOPointEvaluator(DatasetEvaluator):
                 self.predictions.append(prediction)
     
     def evaluate(self):
+        # Synchronize distributed processes
+        if self.distributed:
+            comm.synchronize()
+            predictions = comm.gather(self.predictions, dst=0)
+            self.predictions = list(itertools.chain(*predictions))
+
+            if not comm.is_main_process():
+                return {}
+        
         # Sort the predictions and GT lists by image_id
         self.metadata = sorted(self.metadata, key=lambda d: d['image_id'])
         self.predictions = sorted(self.predictions, key=lambda d: d['image_id'])
@@ -150,7 +161,7 @@ class COCOPointEvaluator(DatasetEvaluator):
 
         # and sum (\Delta recall) * prec
         ap = np.sum((recall_list[i + 1] - recall_list[i]) * precision_list[i + 1])
-        print(f"Average precision: {round(100 * ap, 2)}%.")
+        print(f"Average precision: {round(100 * ap, 2)}%.\nOptimal confidence level: {round(100 * optimal_confidence, 2)}%.\nBest F1 score: {round(100 * F1_max, 2)}%.")
         ########### AVERAGE PRECISION CALCULATION END ###########
         
         return None
