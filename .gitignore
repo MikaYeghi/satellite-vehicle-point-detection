@@ -1,5 +1,6 @@
 __pycache__/
 output/
+results/
 saved_models/
 .ipynb_checkpoints/
 

@@ -1,8 +1,12 @@
+import os
 import torch
 import itertools
 import numpy as np
 import pandas as pd
 import detectron2.utils.comm as comm
+from PIL import Image
+from tqdm import tqdm
+from matplotlib import pyplot as plt
 from detectron2.data import DatasetCatalog
 from detectron2.evaluation import DatasetEvaluator
 from detectron2.evaluation.coco_evaluation import instances_to_coco_json
@@ -12,6 +16,7 @@ import pdb
 class COCOPointEvaluator(DatasetEvaluator):
     def __init__(self,
         dataset_name,
+        logger,
         accept_radius=6,
         tasks=None,
         distributed=True,
@@ -23,6 +28,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         allow_cached_coco=True,
     ):
         # Settings
+        self.logger = logger
         self.dataset_name = dataset_name
         self.accept_radius = accept_radius
         self.tasks = tasks
@@ -41,6 +47,9 @@ class COCOPointEvaluator(DatasetEvaluator):
         self.predictions = []
         
     def process(self, inputs, outputs):
+        """
+        Predictions are stored in COCO bounding box format, i.e.: (x_min, y_min, width, height).
+        """
         for input, output in zip(inputs, outputs):
             prediction = {"image_id": input["image_id"]}
 
@@ -53,6 +62,11 @@ class COCOPointEvaluator(DatasetEvaluator):
                 self.predictions.append(prediction)
     
     def evaluate(self):
+        """
+        GT locations are stored in (x_min, y_min, x_max, y_max) format, while predictions are processed
+        into COCO format, i.e. (x_min, y_min, width, height). This is accounted for whenever computing
+        the bounding box center locations.
+        """
         # Synchronize distributed processes
         if self.distributed:
             comm.synchronize()
@@ -97,11 +111,11 @@ class COCOPointEvaluator(DatasetEvaluator):
             
             # Otherwise, assess which prediction is TP
             pred_locations = torch.tensor(
-                [bbox['bbox'][:2] for bbox in pred_data['instances']],
+                [[bbox['bbox'][0] + 0.5 * bbox['bbox'][2], bbox['bbox'][1] + 0.5 * bbox['bbox'][3]] for bbox in pred_data['instances']],
                 dtype=torch.float
             )
             gt_locations = torch.tensor(
-                [bbox['bbox'][:2] for bbox in gt_data['annotations']],
+                [0.5 * (bbox['bbox'][:2] + bbox['bbox'][2:]) for bbox in gt_data['annotations']],
                 dtype=torch.float
             )
             distances = torch.cdist(gt_locations, pred_locations)
@@ -161,7 +175,78 @@ class COCOPointEvaluator(DatasetEvaluator):
 
         # and sum (\Delta recall) * prec
         ap = np.sum((recall_list[i + 1] - recall_list[i]) * precision_list[i + 1])
-        print(f"Average precision: {round(100 * ap, 2)}%.\nOptimal confidence level: {round(100 * optimal_confidence, 2)}%.\nBest F1 score: {round(100 * F1_max, 2)}%.")
+        self.logger.info(f"RESULTS:\nAverage precision: {round(100 * ap, 2)}%.\nOptimal confidence level: {round(100 * optimal_confidence, 2)}%.\nBest F1 score: {round(100 * F1_max, 2)}%.")
         ########### AVERAGE PRECISION CALCULATION END ###########
         
-        return None
+        # Construct the results dictionary
+        results = {
+            "AP": ap,
+            "Best F1 score": F1_max,
+            "Optimal confidence": optimal_confidence
+        }
+        
+        # Plot the results
+        self.logger.info("Plotting the results")
+        self.plot_results(self.predictions.copy(), self.metadata.copy(), optimal_confidence)
+        
+        return results
+    
+    def plot_results(self, predictions, metadata, confidence_threshold):
+        # Remove predictions which have confidence score lower than threshold
+        predictions_ = []
+        for prediction in predictions:
+            prediction_ = prediction.copy()
+            prediction_['instances'] = []
+            for instance in prediction['instances']:
+                if instance['score'] >= confidence_threshold:
+                    prediction_['instances'].append(instance)
+            predictions_.append(prediction_)
+        predictions = predictions_
+        
+        # Sort the predictions and GT lists by image_id
+        metadata = sorted(metadata, key=lambda d: d['image_id'])
+        predictions = sorted(predictions, key=lambda d: d['image_id'])
+        
+        # Plot the images
+        for i in tqdm(range(len(predictions))):
+            assert metadata[i]['image_id'] == predictions[i]['image_id']
+            
+            # Skip empty images
+            if len(metadata[i]['annotations']) == 0 and len(predictions[i]['instances']) == 0:
+                continue
+            
+            # Retrieve the image
+            image = Image.open(metadata[i]['file_name'])
+            file_name = metadata[i]['file_name'].split('/')[-1]
+            
+            # Initialize a plt figure
+            fig, ax = plt.subplots()
+            
+            # Get x and y coordinates of the predictions, and whether they are TP or FP
+            pred_xs = [instance['bbox'][0] + 0.5 * instance['bbox'][2] for instance in predictions[i]['instances']]
+            pred_ys = [instance['bbox'][1] + 0.5 * instance['bbox'][3] for instance in predictions[i]['instances']]
+            TPs = [instance['TP'] for instance in predictions[i]['instances']]
+            
+            # Get the ground-truth points
+            gt_xs = [0.5 * (annotation['bbox'][0] + annotation['bbox'][2]) for annotation in metadata[i]['annotations']]
+            gt_ys = [0.5 * (annotation['bbox'][1] + annotation['bbox'][3]) for annotation in metadata[i]['annotations']]
+            
+            # Assign colors to points depending on the TP value
+            pred_colors = ['green' if TP else 'red' for TP in TPs]
+            gt_colors = ['blue' for _ in range(len(metadata[i]['annotations']))]
+            
+            # Plot the image
+            ax.imshow(image)
+            
+            # Plot the ground-truth colors
+            ax.scatter(gt_xs, gt_ys, c=gt_colors)
+            
+            # Plot the predicted colors
+            ax.scatter(pred_xs, pred_ys, c=pred_colors)
+            
+            # Save the plot
+            fig.savefig(f"results/{file_name}")
+            
+            # Clear plt
+            del fig, ax
+            plt.close()
