@@ -100,11 +100,15 @@ class COCOPointEvaluator(DatasetEvaluator):
             filenames = filenames + [gt_data['file_name']] * n_preds
             
             # If there are no GT points, label all predictions as FP
+            # If there are no predictions, just update the GT count
             if len(gt_data['annotations']) == 0:
                 for j in range(len(pred_data['instances'])):
                     self.predictions[i]['instances'][j]['TP'] = False
                     TP_list.append(False)
                     scores_list.append(pred_data['instances'][j]['score'])
+                continue
+            elif len(pred_data['instances']) == 0:
+                total_gt_count += len(gt_data['annotations'])
                 continue
             else:
                 total_gt_count += len(gt_data['annotations'])
