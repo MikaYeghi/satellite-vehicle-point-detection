@@ -18,14 +18,17 @@ import pdb
 class Renderer(nn.Module):
     def __init__(self, device):
         super().__init__()
-        # self.avg_pool = nn.AvgPool2d(5, stride=5)
+        self.avg_pool = nn.AvgPool2d(5, stride=5)
         self.device = device
     
     def render(self, mesh, background_image, elevation, azimuth, lights_direction, distance=5.0, 
-               scaling_factor=0.85, image_size=250, blur_radius=0.0, faces_per_pixel=1, intensity=0.3, ambient_color=((0.05, 0.05, 0.05),)):
-        # transform = tv_transf.Resize((250, 250))
-        # background_image = transform(background_image).permute(1, 2, 0)
-        background_image = background_image.permute(1, 2, 0)
+               scaling_factor=0.85, image_size=384, blur_radius=0.0, faces_per_pixel=1, intensity=0.3, ambient_color=((0.05, 0.05, 0.05),)):
+        # Image needs to be upscaled and then average pooled to make the car less sharp-edged
+        image_size = image_size * 5
+        transform = tv_transf.Resize((image_size, image_size))
+        background_image = transform(background_image).permute(1, 2, 0)
+        
+        # Initialize rendering parameters
         R, T = look_at_view_transform(dist=distance, elev=elevation, azim=azimuth)
         scale_xyz = scaling_factor * torch.tensor([1.0, 1.0, 1.0], device=self.device).unsqueeze(0)
         cameras = FoVOrthographicCameras(
@@ -59,6 +62,10 @@ class Renderer(nn.Module):
 
         images = renderer(mesh, lights=lights, cameras=cameras)
         images = images[0, ..., :3]
+        
+        # Downscale the image
+        images = self.avg_pool(images.permute(2, 0, 1)).permute(1, 2, 0)
+        
         return images
     
     def render_batch(self, meshes, background_images, elevations, azimuths, light_directions, distances,
