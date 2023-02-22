@@ -1,0 +1,4 @@
+DATA_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Real-384px-0.25m"
+SAVE_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-version-1"
+MESHES_DIR: "/home/myeghiaz/Storage/GAN-vehicles-1000"
+MESHES_TRAINVALTEST_SPLIT: [0.5, 0.25, 0.25]
