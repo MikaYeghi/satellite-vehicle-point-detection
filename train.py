@@ -194,6 +194,11 @@ def setup(args):
 def main(args):
     cfg = setup(args)
 
+    # Setup the dataset
+    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-reduced"
+    # data_path = "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-version-1"
+    setup_dataset(data_path)
+    
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
@@ -207,10 +212,6 @@ def main(args):
         model = DistributedDataParallel(
             model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
         )
-
-    # Setup the dataset before training
-    data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-debug"
-    setup_dataset(data_path)
     
     do_train(cfg, model, resume=args.resume)
     return do_test(cfg, model)
