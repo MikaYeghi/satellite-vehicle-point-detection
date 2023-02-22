@@ -21,6 +21,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         tasks=None,
         distributed=True,
         output_dir=None,
+        plot_results=False,
         *,
         max_dets_per_image=None,
         use_fast_impl=True,
@@ -38,6 +39,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         self.use_fast_impl = use_fast_impl
         self.kpt_oks_sigmas = kpt_oks_sigmas
         self.allow_cached_coco = allow_cached_coco
+        self.plot_results = plot_results
         
         # Evaluation 
         self.predictions = []
@@ -137,7 +139,7 @@ class COCOPointEvaluator(DatasetEvaluator):
                 self.predictions[i]['instances'][j]['TP'] = is_TP
                 TP_list.append(is_TP)
                 scores_list.append(pred_data['instances'][j]['score'])
-            
+        
         # Construct the evaluation info dataframe
         evaluation_info = pd.DataFrame(
             list(zip(filenames, scores_list, TP_list)), 
@@ -190,8 +192,9 @@ class COCOPointEvaluator(DatasetEvaluator):
         }
         
         # Plot the results
-        self.logger.info("Plotting the results")
-        self.plot_results(self.predictions.copy(), self.metadata.copy(), optimal_confidence)
+        if self.plot_results:
+            self.logger.info("Plotting the results")
+            self.plot_results(self.predictions.copy(), self.metadata.copy(), optimal_confidence)
         
         return results
     
