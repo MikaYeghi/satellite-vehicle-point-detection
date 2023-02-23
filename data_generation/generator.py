@@ -9,11 +9,13 @@ from PIL import Image
 from tqdm import tqdm
 from pathlib import Path
 from random import shuffle
+from torch.utils.data import DataLoader
 from torchvision import transforms
 from pytorch3d.io import load_objs_as_meshes
 from pytorch3d.transforms import euler_angles_to_matrix
 
 from rendering.renderer import Renderer
+from .dataset import GeneratorDataset
 from .utils import sample_random_elev_azimuth
 
 from logger import get_logger
@@ -85,20 +87,27 @@ class Generator:
         
         return (mesh.clone(), offset)
     
-    def randomly_place_meshes(self, meshes, distance, elevation, azimuth, lights_direction, scaling_factor, intensity):
-        return self.randomly_move_and_rotate_mesh(meshes[0], scaling_factor)
+    def randomly_place_meshes(self, meshes, scaling_factors):
+        offsets = [None for _ in range(len(meshes))]
+        for i in range(len(meshes)):
+            meshes[i], offsets[i] = self.randomly_move_and_rotate_mesh(meshes[i], scaling_factors[i])
+        return meshes, offsets
     
-    def construct_annotations_file(self, locations):
-        annotations = {
-            "van_rv": np.empty(shape=(0, 2)),
-            "truck": np.empty(shape=(0, 2)),
-            "bus": np.empty(shape=(0, 2)),
-            "trailer_small": np.empty(shape=(0, 2)),
-            "specialized": np.empty(shape=(0, 2)),
-            "trailer_large": np.empty(shape=(0, 2)),
-            "unknown": np.empty(shape=(0, 2)),
-            "small": locations
-        }
+    def construct_annotations_files(self, locations):
+        annotations = []
+        
+        for locations_ in locations:
+            annotations_ = {
+                "van_rv": np.empty(shape=(0, 2)),
+                "truck": np.empty(shape=(0, 2)),
+                "bus": np.empty(shape=(0, 2)),
+                "trailer_small": np.empty(shape=(0, 2)),
+                "specialized": np.empty(shape=(0, 2)),
+                "trailer_large": np.empty(shape=(0, 2)),
+                "unknown": np.empty(shape=(0, 2)),
+                "small": locations_.unsqueeze(0).cpu().numpy()
+            }
+            annotations.append(annotations_)
     
         return annotations
     
@@ -111,95 +120,87 @@ class Generator:
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "images")).mkdir(parents=True, exist_ok=True)
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "annotations")).mkdir(parents=True, exist_ok=True)
         
+        # Initialize the dataloader
+        logger.info("Initializing the train loader")
+        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
+        train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'])
+        logger.info("Initializing the val loader")
+        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
+        val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'])
+        logger.info("Initializing the test loader")
+        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
+        test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'])
+        
         # Generate train/val/test sets
-        self.generate_set("train")
-        self.generate_set("validation")
-        self.generate_set("test")
+        self.generate_set("train", train_loader)
+        self.generate_set("validation", val_loader)
+        self.generate_set("test", test_loader)
         
         logger.info("Dataset generation finished!")
         
-    def generate_set(self, set_type):
+    def generate_set(self, set_type, dataloader):
         assert set_type in ['train', 'validation', 'test'], "Set type must be one of train/val/test!"
         data_dir = os.path.join(self.cfg['DATA_DIR'], set_type)
         save_dir = os.path.join(self.cfg['SAVE_DIR'], set_type)
         image_counter = 0
         logger.info(f"Generating {set_type} dataset")
         
-        # Load annotation files
-        pil_to_tensor = transforms.ToTensor()
-        annotation_files = glob.glob(os.path.join(data_dir, "annotations") + "/*.pkl")
-        
         # Populate images with rendered vehicles
-        for annotations_file in tqdm(annotation_files):
-            with open(annotations_file, 'rb') as f:
-                annotations = pickle.load(f)
-            del annotations['unknown'] # delete the unknown vehicles from the dataset
+        for images_batch in tqdm(dataloader):
+            batch_size = len(images_batch)
             
-            # Check if this annotation file is empty. If not, skip it.
-            not_empty = any(v.shape[0] > 0 for v in annotations.values())
-            if not_empty:
-                continue
-                
-            # Otherwise, load the image and add vehicles to it
-            image_path = os.path.join(
-                data_dir, 
-                "images",
-                annotations_file.split('/')[-1][:-4] + ".jpg"
-            )
-            image = pil_to_tensor(Image.open(image_path).convert('RGB'))
-            
-            # Randomly select a mesh
-            mesh = random.choice(self.meshes[set_type])
+            # Randomly select meshes
+            meshes = random.choices(self.meshes[set_type], k=batch_size)
             
             # Move image and mesh to the device
-            mesh = mesh.to(self.device)
-            image = image.to(self.device)
+            meshes = [mesh.to(self.device) for mesh in meshes]
+            images_batch = images_batch.to(self.device)
             
             # Sample rendering parameters (TO DO: sample light direction)
-            distance = 5.0
-            elevation, azimuth = 90, 0
-            lights_direction = torch.tensor([random.uniform(-1, 1),-1.0,random.uniform(-1, 1)], device=self.device, requires_grad=True).unsqueeze(0)
-            scaling_factor = random.uniform(0.04, 0.06)
-            intensity = random.uniform(0.5, 2.0)
+            distances = [5.0 for _ in range(batch_size)]
+            elevations = [90 for _ in range(batch_size)]
+            azimuths = [0 for _ in range(batch_size)]
+            lights_directions = torch.rand(batch_size, 3) * 2 - 1
+            lights_directions[:, 1] = -1
+            scaling_factors = torch.rand(batch_size, 1) * (0.06 - 0.04) + 0.04
+            intensities = torch.rand(batch_size, 1) * (2 - 0.5) + 0.5
             
             # Randomly move and rotate the meshes
-            mesh, offset = self.randomly_place_meshes(
-                mesh, 
-                distance, 
-                elevation, 
-                azimuth, 
-                lights_direction, 
-                scaling_factor, 
-                intensity
+            meshes, offsets = self.randomly_place_meshes(
+                meshes,
+                scaling_factors
             )
             
             # Convert offset to coordinates. Note: required shape (B, 2).
-            locations = np.expand_dims(self.image_size / 2 * (1 + offset), 0)
+            locations = torch.tensor(offsets, device=self.device)
+            locations = (1 + locations) * self.image_size / 2
             
-            # Render the image
-            synthetic_image = self.renderer.render(
-                mesh, 
-                image, 
-                elevation, 
-                azimuth,
-                lights_direction,
-                scaling_factor=scaling_factor,
-                intensity=intensity,
-                ambient_color=((0.05, 0.05, 0.05),),
-                distance=distance,
+            # Render the images
+            synthetic_images = self.renderer.render_batch(
+                meshes, 
+                images_batch, 
+                elevations, 
+                azimuths,
+                lights_directions,
+                scaling_factors=scaling_factors,
+                intensities=intensities,
+                distances=distances,
                 image_size=self.image_size
             )
             
             # Construct the annotations
-            annotations = self.construct_annotations_file(locations)
+            annotations = self.construct_annotations_files(locations)
             
-            # Save the image
-            image_save_path = os.path.join(save_dir, "images", f"image_{image_counter}.jpg")
-            self.tensor_to_pil(synthetic_image.permute(2, 0, 1)).save(image_save_path, quality=95)
+            # Save the images and annotations
+            for k in range(len(synthetic_images)):
+                # Image
+                synthetic_image = synthetic_images[k]
+                image_save_path = os.path.join(save_dir, "images", f"image_{image_counter}_{k}.jpg")
+                self.tensor_to_pil(synthetic_image).save(image_save_path, quality=95)
             
-            # Save annotations
-            anns_save_path = os.path.join(save_dir, "annotations", f"image_{image_counter}.pkl")
-            with open(anns_save_path, 'wb') as f:
-                pickle.dump(annotations, f, protocol=pickle.HIGHEST_PROTOCOL)
-        
+                # Annotations
+                anns_save_path = os.path.join(save_dir, "annotations", f"image_{image_counter}_{k}.pkl")
+                with open(anns_save_path, 'wb') as f:
+                    pickle.dump(annotations[k], f, protocol=pickle.HIGHEST_PROTOCOL)
+                
             image_counter += 1

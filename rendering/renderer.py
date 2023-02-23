@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-import torchvision.transforms as tv_transf
+from torchvision.transforms import Resize
 
 from pytorch3d.renderer import (
     look_at_view_transform,
@@ -12,6 +12,7 @@ from pytorch3d.renderer import (
     SoftPhongShader,
     BlendParams
 )
+from pytorch3d.structures import join_meshes_as_batch
 
 import pdb
 
@@ -25,7 +26,7 @@ class Renderer(nn.Module):
                scaling_factor=0.85, image_size=384, blur_radius=0.0, faces_per_pixel=1, intensity=0.3, ambient_color=((0.05, 0.05, 0.05),)):
         # Image needs to be upscaled and then average pooled to make the car less sharp-edged
         image_size = image_size * 5
-        transform = tv_transf.Resize((image_size, image_size))
+        transform = Resize((image_size, image_size))
         background_image = transform(background_image).permute(1, 2, 0)
         
         # Initialize rendering parameters
@@ -69,9 +70,14 @@ class Renderer(nn.Module):
         return images
     
     def render_batch(self, meshes, background_images, elevations, azimuths, light_directions, distances,
-                     scaling_factors, intensities, image_size=250, blur_radius=0.0, faces_per_pixel=1, ambient_color=((0.05, 0.05, 0.05),)):
-        transform = tv_transf.Resize((250, 250))
+                     scaling_factors, intensities, image_size=384, blur_radius=0.0, faces_per_pixel=1, ambient_color=((0.05, 0.05, 0.05),)):
+        # Image needs to be upscaled and then average pooled to make the car less sharp-edged
+        image_size = image_size * 5
+        transform = Resize((image_size, image_size))
         background_images = transform(background_images).permute(0, 2, 3, 1)
+        scaling_factors = scaling_factors.repeat(1, 3)
+        intensities = intensities.repeat(1, 3)
+        
         R, T = look_at_view_transform(dist=distances, elev=elevations, azim=azimuths)
         cameras = FoVOrthographicCameras(
             device=self.device,
@@ -86,7 +92,12 @@ class Renderer(nn.Module):
             faces_per_pixel=faces_per_pixel, 
         )
         
-        lights = DirectionalLights(device=self.device, direction=light_directions, ambient_color=ambient_color, diffuse_color=intensities)
+        lights = DirectionalLights(
+            device=self.device, 
+            direction=light_directions, 
+            ambient_color=ambient_color, 
+            diffuse_color=intensities
+        )
         
         renderer = MeshRenderer(
             rasterizer=MeshRasterizer(
@@ -100,6 +111,8 @@ class Renderer(nn.Module):
                 blend_params=BlendParams(background_color=background_images)
             )
         )
+        
+        meshes = join_meshes_as_batch(meshes)
         
         images = renderer(meshes, lights=lights, cameras=cameras)
         images = images.permute(0, 3, 1, 2)

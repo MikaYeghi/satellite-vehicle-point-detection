@@ -11,9 +11,9 @@ import argparse
 from torchvision.ops import boxes as box_ops
 from torch import Tensor
 
+from detectron2.data import detection_utils
 from detectron2.structures import BoxMode, Instances, Boxes
 from detectron2.data import MetadataCatalog, DatasetCatalog
-from detectron2.data import detection_utils
 
 import time
 import pdb

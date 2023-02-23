@@ -139,7 +139,7 @@ class COCOPointEvaluator(DatasetEvaluator):
                 self.predictions[i]['instances'][j]['TP'] = is_TP
                 TP_list.append(is_TP)
                 scores_list.append(pred_data['instances'][j]['score'])
-        
+        pdb.set_trace()
         # Construct the evaluation info dataframe
         evaluation_info = pd.DataFrame(
             list(zip(filenames, scores_list, TP_list)), 
