@@ -201,15 +201,24 @@ class Generator:
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "images")).mkdir(parents=True, exist_ok=True)
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "annotations")).mkdir(parents=True, exist_ok=True)
         
+        # Initialize the dataset
+        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
+        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
+        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
+        
+        # Retain required number of images
+        if self.cfg['NUM_IMAGES']['ENABLE']:
+            # Retain only a subset of the original datasets
+            train_set.retain_n_images(self.cfg['NUM_IMAGES']['TRAIN'])
+            val_set.retain_n_images(self.cfg['NUM_IMAGES']['VALIDATION'])
+            test_set.retain_n_images(self.cfg['NUM_IMAGES']['TEST'])
+        
         # Initialize the dataloaders
         logger.info("Initializing the train loader")
-        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
         train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'])
         logger.info("Initializing the validation loader")
-        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
         val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'])
         logger.info("Initializing the test loader")
-        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
         test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'])
         
         # Generate train/val/test sets
@@ -299,15 +308,24 @@ class Generator:
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "images")).mkdir(parents=True, exist_ok=True)
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "annotations")).mkdir(parents=True, exist_ok=True)
 
+        # Initialize the dataset
+        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
+        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
+        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
+        
+        # Retain required number of images
+        if self.cfg['NUM_IMAGES']['ENABLE']:
+            # Retain only a subset of the original datasets
+            train_set.retain_n_images(self.cfg['NUM_IMAGES']['TRAIN'])
+            val_set.retain_n_images(self.cfg['NUM_IMAGES']['VALIDATION'])
+            test_set.retain_n_images(self.cfg['NUM_IMAGES']['TEST'])
+        
         # Initialize the dataloaders
         logger.info("Initializing the train loader")
-        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
         train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'])
         logger.info("Initializing the validation loader")
-        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
         val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'])
         logger.info("Initializing the test loader")
-        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
         test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'])
 
         # Generate train/val/test sets
@@ -388,16 +406,6 @@ class Generator:
                 anns_save_path = os.path.join(save_dir, "annotations", f"image_{image_counter}_{k}.pkl")
                 with open(anns_save_path, 'wb') as f:
                     pickle.dump(annotations[k], f, protocol=pickle.HIGHEST_PROTOCOL)
-                    
-                # DEBUG
-                from matplotlib import pyplot as plt
-                fig, ax = plt.subplots()
-                ax.imshow(synthetic_image.permute(1, 2, 0).cpu().numpy())
-                xs = annotations[k]['small'][:, 0]
-                ys = annotations[k]['small'][:, 1]
-                ax.plot(xs, ys, 'rx')
-                fig.savefig(f"results/image_{image_counter}_{k}.png")
-                plt.close(fig)
                 
             image_counter += 1
         

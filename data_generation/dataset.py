@@ -1,5 +1,6 @@
 import os
 import glob
+import random
 import pickle
 from PIL import Image
 from tqdm import tqdm
@@ -69,6 +70,16 @@ class GeneratorDataset(Dataset):
             metadata.append(metadata_)
         
         return metadata
+    
+    def retain_n_images(self, n):
+        """
+        This function randomly selects n images from the extracted dataset, and removes all other image metadata.
+        """
+        assert n > 0, "Number of retained images must be greater than 0!"
+        original_length = len(self.metadata)
+        if n < original_length:
+            self.metadata = random.sample(self.metadata, n)
+        logger.info(f"Removed {original_length - len(self.metadata)} images from the dataset. Using {len(self.metadata)} images.")
     
     def __len__(self):
         return len(self.metadata)
