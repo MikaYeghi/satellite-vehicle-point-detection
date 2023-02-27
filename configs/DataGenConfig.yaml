@@ -1,5 +1,11 @@
 DATA_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Real-384px-0.25m"
-SAVE_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-1.1-proba"
-MESHES_DIR: "/home/myeghiaz/Storage/GAN-vehicles-1000"
+SAVE_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-multi-1.0"
+MESHES_DIR: "/home/myeghiaz/Storage/GAN-vehicles"
 MESHES_TRAINVALTEST_SPLIT: [0.5, 0.25, 0.25]
-BATCH_SIZE: 32
+IMAGE_SIZE: 384
+DEVICE: cuda
+BATCH_SIZE: 8
+MULTIVEHICLE:
+    ENABLE: True
+    N_VEHICLES_MAX: 10
+    LOCATION_SAMPLING: random
