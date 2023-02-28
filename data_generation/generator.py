@@ -37,6 +37,9 @@ class Generator:
         # Load the meshes, already split into train/val/test meshes
         self.meshes = self.load_trainvaltest_meshes(cfg['MESHES_DIR'], cfg['MESHES_TRAINVALTEST_SPLIT'])
     
+        # Load the distribution of vehicles if needed
+        self.load_num_vehicles_dist()
+    
     def load_trainvaltest_meshes(self, meshes_dir, trainvaltest_split, device='cpu'):
         logger.info(f"Loading meshes from {meshes_dir}")
         
@@ -66,6 +69,31 @@ class Generator:
         }
         
         return meshes
+    
+    def load_num_vehicles_dist(self):
+        if not self.cfg['MULTIVEHICLE']['ENABLE']:
+            distribution = None
+        else:
+            if self.cfg['MULTIVEHICLE']['LOCATION_SAMPLING'] == 'random':
+                distribution = None
+            elif self.cfg['MULTIVEHICLE']['LOCATION_SAMPLING'] == 'real':
+                """
+                Load a pickle file that contains a dictionary in the following format:
+                {num_vehicles: occurence_frequency}_i for i = 1, ..., N
+                This dictionary describes an unnormalized distribution, that needs to be normalized.
+                """
+                with open(self.cfg['MULTIVEHICLE']['LOCATION_SAMPLING_FILE'], 'rb') as f:
+                    distribution = pickle.load(f)
+                
+                # Find the maximum value
+                max_freq = max(distribution.values())
+
+                # Divide each value by the maximum value to normalize
+                distribution = {k: v / max_freq for k, v in distribution.items()}
+            else:
+                logger.critical("LOCATION_SAMPLING parameter must be one of the following: random, real.")
+                raise NotImplementedError
+        self.num_vehicles_dist = distribution
     
     def randomly_move_and_rotate_mesh(self, mesh, scaling_factor):
         # Apply random rotation
@@ -414,6 +442,14 @@ class Generator:
         
         if self.cfg['MULTIVEHICLE']['LOCATION_SAMPLING'] == 'random':
             n_vehicles_list = [random.randint(1, n_vehicles_max) for _ in range(batch_size)]
+        elif self.cfg['MULTIVEHICLE']['LOCATION_SAMPLING'] == 'real':
+            n_vehicles_list = []
+            for _ in range(batch_size):
+                accepted = False
+                while not accepted:
+                    num_vehicles = random.choice(list(self.num_vehicles_dist.keys()))
+                    accepted = (random.uniform(0, 1) < self.num_vehicles_dist[num_vehicles])
+                n_vehicles_list.append(num_vehicles)
         else:
             raise NotImplementedError
         
