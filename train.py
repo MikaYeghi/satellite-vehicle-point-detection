@@ -196,7 +196,7 @@ def main(args):
 
     # Setup the dataset
     data_path = "/var/storage/myeghiaz/Detection/SatDet-Real-384px-0.25m-reduced"
-    # data_path = "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-1.1"
+    # data_path = "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-multi-1.2"
     setup_dataset(data_path)
     
     model = build_model(cfg)
