@@ -26,10 +26,12 @@ import torch
 from torch.nn.parallel import DistributedDataParallel
 
 import detectron2.utils.comm as comm
+import detectron2.data.transforms as T
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import (
     MetadataCatalog,
+    DatasetMapper,
     build_detection_test_loader,
     build_detection_train_loader,
 )
@@ -139,7 +141,15 @@ def do_train(cfg, model, resume=False):
 
     # compared to "train_net.py", we do not support accurate timing and
     # precise BN here, because they are not trivial to implement in a small training loop
-    data_loader = build_detection_train_loader(cfg)
+    data_loader = build_detection_train_loader(cfg, mapper=DatasetMapper(cfg, is_train=True, augmentations=[
+        T.RandomContrast(0.2, 2.0),
+        T.RandomBrightness(0.2, 2.0),
+        T.RandomSaturation(0.2, 2.0),
+        T.RandomLighting(1.0),
+        T.RandomFlip(horizontal=True),
+        T.RandomFlip(horizontal=False, vertical=True),
+        T.RandomRotation([0.0, 360.0], expand=False)
+    ]))
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
         for data, iteration in zip(data_loader, range(start_iter, max_iter)):
