@@ -27,6 +27,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         use_fast_impl=True,
         kpt_oks_sigmas=(),
         allow_cached_coco=True,
+        FP_FN_analysis=False
     ):
         # Settings
         self.logger = logger
@@ -44,6 +45,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         # Evaluation 
         self.predictions = []
         self.metadata = DatasetCatalog.get(dataset_name)
+        self.FP_FN_analysis = FP_FN_analysis
     
     def reset(self):
         self.predictions = []
@@ -84,6 +86,11 @@ class COCOPointEvaluator(DatasetEvaluator):
         filenames = []
         TP_list = []
         scores_list = []
+        
+        # FP-FN-analysis
+        if self.FP_FN_analysis:
+            FN_list = []
+            total_fn_count = 0
         
         # Assert the lengths of the predictions and GT lists are equal
         assert len(self.metadata) == len(self.predictions)
@@ -139,6 +146,16 @@ class COCOPointEvaluator(DatasetEvaluator):
                 self.predictions[i]['instances'][j]['TP'] = is_TP
                 TP_list.append(is_TP)
                 scores_list.append(pred_data['instances'][j]['score'])
+            
+            # Record FNs
+            if self.FP_FN_analysis:
+                FN_info = self.metadata[i].copy()
+                FN_idxs = [i for i in range(len(gt_locations)) if i not in TP_idxs]
+                FN_count = len(FN_idxs)
+                FN_info['FN_idxs'] = FN_idxs
+                FN_info['FN_count'] = FN_count
+                FN_list.append(FN_info)
+                total_fn_count += len(FN_idxs)
         
         # Construct the evaluation info dataframe
         evaluation_info = pd.DataFrame(
@@ -195,6 +212,35 @@ class COCOPointEvaluator(DatasetEvaluator):
         if self.plot_results:
             self.logger.info("Plotting the results")
             self.plot_results(self.predictions.copy(), self.metadata.copy(), optimal_confidence)
+        
+        # FP-FN-analysis
+        if self.FP_FN_analysis:
+            # Sort the list of FNs by the FN ratio
+            image_counter = 0
+            FN_list = sorted(FN_list, key=lambda d: d['FN_count'], reverse=True)
+            for image_info in FN_list:
+                image = Image.open(image_info['file_name']).convert('RGB')
+                
+                # Plot the original image
+                fig, ax = plt.subplots()
+                ax.imshow(image)
+                
+                # Plot GT data
+                for idx in range(len(image_info['annotations'])):
+                    is_FN = idx in image_info['FN_idxs']
+                    gt_x = 0.5 * (image_info['annotations'][idx]['bbox'][0] + image_info['annotations'][idx]['bbox'][2])
+                    gt_y = 0.5 * (image_info['annotations'][idx]['bbox'][1] + image_info['annotations'][idx]['bbox'][3])
+                    if is_FN:
+                        color = 'r'
+                    else:
+                        color = 'g'
+                    ax.plot(gt_x, gt_y, color + 'o')
+                
+                # Save the figure
+                fig.savefig(f"results/image_{image_counter}.png", dpi=150)
+                
+                image_counter += 1
+                plt.close(fig)
         
         return results
     
