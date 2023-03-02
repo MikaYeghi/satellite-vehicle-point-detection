@@ -165,7 +165,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         
         # Sort the dataframe in descending confidence order
         evaluation_info = evaluation_info.sort_values(by=['Confidence'], ascending=False)
-
+        
         # Create the FP column
         evaluation_info["FP"] = evaluation_info.apply(lambda row : 1 - row['TP'], axis=1)
 
@@ -178,7 +178,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         evaluation_info["Recall"] = evaluation_info.apply(lambda row : row["Acc_TP"] / total_gt_count, axis=1)
 
         # Create the "F1" score column and extract the optimal confidence
-        evaluation_info["F1"] = evaluation_info.apply(lambda row : 2 * row['Precision'] * row['Recall'] / (row['Precision'] + row['Recall']), axis=1)
+        evaluation_info["F1"] = evaluation_info.apply(lambda row : 2 * row['Precision'] * row['Recall'] / (row['Precision'] + row['Recall'] + 1e-6), axis=1)
         optimal_confidence = evaluation_info.loc[evaluation_info['F1'].idxmax()]['Confidence']
         F1_max = evaluation_info.loc[evaluation_info['F1'].idxmax()]['F1']
 
