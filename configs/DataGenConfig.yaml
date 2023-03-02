@@ -1,17 +1,23 @@
 DATA_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Real-384px-0.25m"
-SAVE_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-multi-1.2"
+SAVE_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-multi-1.3.3"
 MESHES_DIR: "/home/myeghiaz/Storage/GAN-vehicles-1000"
 MESHES_TRAINVALTEST_SPLIT: [0.5, 0.25, 0.25]
 IMAGE_SIZE: 384
 DEVICE: cuda
-BATCH_SIZE: 16
+BATCH_SIZE: 8
 NUM_IMAGES:
     ENABLE: True
     TRAIN: 25000
-    VALIDATION: 5000
-    TEST: 2000
+    VALIDATION: 2000
+    TEST: 1000
 MULTIVEHICLE:
     ENABLE: True
     N_VEHICLES_MAX: 25
     LOCATION_SAMPLING: random
     LOCATION_SAMPLING_FILE: /home/myeghiaz/Project/satellite-image-detection/small-tasks/vehicle-distribution/results/num-vehicles/num_vehicles_dist.pkl
+    MATRIX:
+        ENABLE: True
+        PROBABILITY: 0.2
+        MAX_SIZE: 10
+        WIDTH_SHIFT: 0.052
+        HEIGHT_SHIFT: 0.104

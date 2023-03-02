@@ -95,6 +95,60 @@ class Generator:
                 raise NotImplementedError
         self.num_vehicles_dist = distribution
     
+    def place_matrix(self, meshes, scaling_factor, distance, elevation, azimuth, intensity, matrix_info):
+        # Place each mesh in its cell
+        matrix_height = matrix_info['height']
+        matrix_width = matrix_info['width']
+        step_dw = self.cfg['MULTIVEHICLE']['MATRIX']['WIDTH_SHIFT']
+        step_dh = self.cfg['MULTIVEHICLE']['MATRIX']['HEIGHT_SHIFT']
+        
+        # For centering the matrix
+        center_shift_dx = (matrix_width - 1) * step_dw / 2
+        center_shift_dz = (matrix_height - 1) * step_dh / 2
+        
+        # Random translation
+        matrix_shift_dx = random.uniform(-1, 1)
+        matrix_shift_dz = random.uniform(-1, 1)
+        
+        # Random rotation
+        matrix_rotation = euler_angles_to_matrix(torch.tensor([0, random.uniform(0, 2 * math.pi), 0]), convention="XYZ").to(self.device)
+        
+        offsets = []
+        assert len(meshes) == matrix_height * matrix_width
+        matrix_meshes = []
+        
+        k = 0
+        for i in range(matrix_height):
+            for j in range(matrix_width):
+                mesh = meshes[k]
+                
+                # Get dx and dz
+                mesh_dx = j * step_dw - center_shift_dx + matrix_shift_dx
+                mesh_dz = i * step_dh - center_shift_dz + matrix_shift_dz
+                
+                # Compute the offset
+                offset = np.array([-mesh_dx, -mesh_dz]) # To be in the (x, y) format on the image
+
+                mesh_dx /= scaling_factor
+                mesh_dz /= scaling_factor
+
+                # Apply rotation
+                mesh_rotation = torch.matmul(matrix_rotation, mesh.verts_packed().data.T).T - mesh.verts_packed()
+                mesh.offset_verts_(vert_offsets_packed=mesh_rotation)
+                
+                # Center the mesh before applying translation
+                mesh_dx -= torch.mean(mesh.verts_padded(), dim=1)[0][0].item()
+                mesh_dz -= torch.mean(mesh.verts_padded(), dim=1)[0][2].item()
+
+                # Apply the translation
+                mesh_translation = torch.tensor([mesh_dx, 0, mesh_dz], device=self.device) * torch.ones(size=mesh.verts_padded().shape[1:], device=self.device)
+                mesh.offset_verts_(vert_offsets_packed=mesh_translation)
+                offsets.append(offset)
+                matrix_meshes.append(mesh.clone())
+                k += 1
+        
+        return (matrix_meshes, offsets)
+    
     def randomly_move_and_rotate_mesh(self, mesh, scaling_factor):
         # Apply random rotation
         mesh_rotation = euler_angles_to_matrix(torch.tensor([0, random.uniform(0, 2 * math.pi), 0]), convention="XYZ").to(self.device)
@@ -151,6 +205,7 @@ class Generator:
         while invalid_image:
             offsets = []
             silhouettes = []
+            
             for i in range(len(meshes)):
                 meshes[i], offset = self.randomly_move_and_rotate_mesh(meshes[i], scaling_factor)
                 silhouette = silhouette_renderer(meshes[i], cameras=cameras)
@@ -172,7 +227,7 @@ class Generator:
             meshes[i], offsets[i] = self.randomly_move_and_rotate_mesh(meshes[i], scaling_factors[i])
         return meshes, offsets
     
-    def randomly_place_meshes_multi(self, meshes_list, scaling_factors, distances, elevations, azimuths, intensities):
+    def randomly_place_meshes_multi(self, meshes_list, scaling_factors, distances, elevations, azimuths, intensities, matrix_info):
         assert len(meshes_list) == len(scaling_factors)
         meshes = []
         offsets = []
@@ -185,7 +240,13 @@ class Generator:
             elevation = elevations[i]
             azimuth = azimuths[i]
             intensity = intensities[i]
-            meshes_, offsets_ = self.randomly_move_and_rotate_meshes(meshes_, scaling_factor, distance, elevation, azimuth, intensity)
+            matrix_info_ = matrix_info[i]
+            
+            if matrix_info_['is_matrix']:
+                meshes_, offsets_ = self.place_matrix(meshes_, scaling_factor, distance, elevation, azimuth, intensity, matrix_info[i])
+            else:
+                meshes_, offsets_ = self.randomly_move_and_rotate_meshes(meshes_, scaling_factor, distance, elevation, azimuth, intensity)
+            
             meshes.append(meshes_)
             offsets.append(offsets_)
         return meshes, offsets
@@ -380,6 +441,22 @@ class Generator:
             # Sample meshes for the batch
             meshes_batch_list = [random.choices(self.meshes[set_type], k=n_vehicles) for n_vehicles in n_vehicles_list]
             
+            # Generate matrix meshes (parking lot analog)
+            if self.cfg['MULTIVEHICLE']['MATRIX']['ENABLE']:
+                matrix_prob = self.cfg['MULTIVEHICLE']['MATRIX']['PROBABILITY']
+                matrix_info = [{'is_matrix': random.uniform(0, 1) < matrix_prob} for _ in range(batch_size)]
+                for i in range(batch_size):
+                    if matrix_info[i]['is_matrix']:
+                        matrix_max_size = self.cfg['MULTIVEHICLE']['MATRIX']['MAX_SIZE']
+                        matrix_height = random.randint(2, matrix_max_size)
+                        matrix_width = random.randint(2, matrix_max_size)
+                        meshes_batch_list[i] = random.choices(self.meshes[set_type], k=matrix_height*matrix_width)
+                        n_vehicles_list[i] = matrix_height * matrix_width
+                        matrix_info[i]['height'] = matrix_height
+                        matrix_info[i]['width'] = matrix_width
+            else:
+                matrix_info = [{'is_matrix': False, 'height': 0, 'width': 0} for _ in range(batch_size)]
+            
             # Move meshes to the device
             for i in range(len(n_vehicles_list)):
                 for j in range(n_vehicles_list[i]):
@@ -395,7 +472,7 @@ class Generator:
             intensities = torch.rand(batch_size, 1, device=self.device) * (2 - 0.5) + 0.5
             
             # Randomly place the vehicles in each image
-            meshes, offsets = self.randomly_place_meshes_multi(meshes_batch_list, scaling_factors, distances, elevations, azimuths, intensities)
+            meshes, offsets = self.randomly_place_meshes_multi(meshes_batch_list, scaling_factors, distances, elevations, azimuths, intensities, matrix_info)
             
             # Convert offsets to locations
             locations_batch = []
