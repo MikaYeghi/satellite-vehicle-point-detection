@@ -6,6 +6,7 @@ import pandas as pd
 import detectron2.utils.comm as comm
 from PIL import Image
 from tqdm import tqdm
+from pathlib import Path
 from matplotlib import pyplot as plt
 from detectron2.data import DatasetCatalog
 from detectron2.evaluation import DatasetEvaluator
@@ -22,7 +23,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         distributed=True,
         output_dir=None,
         plot_results=False,
-        FP_FN_analysis=True,
+        FP_FN_analysis=False,
         eval_margin_size=6,
         *,
         max_dets_per_image=None,
@@ -37,6 +38,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         self.tasks = tasks
         self.distributed = distributed
         self.output_dir = output_dir
+        self.results_dir = os.path.join(output_dir, "results")
         self.max_dets_per_image = max_dets_per_image
         self.use_fast_impl = use_fast_impl
         self.kpt_oks_sigmas = kpt_oks_sigmas
@@ -48,6 +50,9 @@ class COCOPointEvaluator(DatasetEvaluator):
         self.metadata = DatasetCatalog.get(dataset_name)
         self.FP_FN_analysis = FP_FN_analysis
         self.eval_margin_size = eval_margin_size # Predictions and GT-s that are close to the image border are discarded
+        
+        # Create the save directory
+        Path(self.results_dir).mkdir(parents=True, exist_ok=True)
     
     def reset(self):
         self.predictions = []
@@ -89,6 +94,9 @@ class COCOPointEvaluator(DatasetEvaluator):
         TP_list = []
         scores_list = []
         
+        # Remove predictions and GT points which are within the specified margin
+        self.apply_margin()
+        
         # FP-FN-analysis
         if self.FP_FN_analysis:
             FN_list = []
@@ -104,9 +112,6 @@ class COCOPointEvaluator(DatasetEvaluator):
         for i in range(len(self.metadata)):
             gt_data = self.metadata[i]
             pred_data = self.predictions[i]
-            
-            # Apply the margin to remove truncated samples
-            gt_data, pred_data = self.apply_margin(gt_data, pred_data)
             
             assert gt_data['image_id'] == pred_data['image_id']
             n_preds = len(pred_data['instances'])
@@ -214,21 +219,26 @@ class COCOPointEvaluator(DatasetEvaluator):
             "Optimal confidence": optimal_confidence
         }
         
-        # Plot the results
+        # Plot inference results
         if self.plot_results:
             self.logger.info("Plotting the results")
-            self.plot_results(self.predictions.copy(), self.metadata.copy(), optimal_confidence)
+            self.save_results(self.predictions.copy(), self.metadata.copy(), optimal_confidence, precision_list, recall_list)
         
         # FP-FN-analysis
         if self.FP_FN_analysis:
             # Sort the list of FNs by the FN ratio
             image_counter = 0
             
+            # Save directory
+            FP_FN_save_dir = os.path.join(self.results_dir, "FP-FN-analysis")
+            Path(FP_FN_save_dir).mkdir(parents=True, exist_ok=True)
+            
             # Sort the images by the number of FNs in a decreasing order
             FN_list = sorted(FN_list, key=lambda d: d['FN_count'], reverse=True)
             
             # Plot the results
-            for image_info in FN_list:
+            self.logger.info("Plotting FN examples.")
+            for image_info in tqdm(FN_list):
                 image = Image.open(image_info['file_name']).convert('RGB')
                 
                 # Stop plotting if there're no images left with FNs
@@ -251,14 +261,14 @@ class COCOPointEvaluator(DatasetEvaluator):
                     ax.plot(gt_x, gt_y, color + 'o')
                 
                 # Save the figure
-                fig.savefig(f"results/image_{image_counter}.png", dpi=150)
+                fig.savefig(os.path.join(FP_FN_save_dir, f"image_{image_counter}.png"), dpi=150)
                 
                 image_counter += 1
                 plt.close(fig)
         
         return results
     
-    def plot_results(self, predictions, metadata, confidence_threshold):
+    def save_results(self, predictions, metadata, confidence_threshold, precision_list, recall_list):
         # Remove predictions which have confidence score lower than threshold
         predictions_ = []
         for prediction in predictions:
@@ -273,6 +283,10 @@ class COCOPointEvaluator(DatasetEvaluator):
         # Sort the predictions and GT lists by image_id
         metadata = sorted(metadata, key=lambda d: d['image_id'])
         predictions = sorted(predictions, key=lambda d: d['image_id'])
+        
+        # Save directory
+        save_dir = os.path.join(self.results_dir, "predictions")
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
         
         # Plot the images
         for i in tqdm(range(len(predictions))):
@@ -312,44 +326,65 @@ class COCOPointEvaluator(DatasetEvaluator):
             ax.scatter(pred_xs, pred_ys, c=pred_colors)
             
             # Save the plot
-            fig.savefig(f"results/{file_name}")
+            fig.savefig(os.path.join(save_dir, file_name))
             
             # Clear plt
             del fig, ax
             plt.close()
     
-    def apply_margin(self, gt_data, pred_data):
-        new_gt_data = {}
-        new_pred_data = {}
+        # Plot the P-R curve
+        fig, ax = plt.subplots()
+        ax.plot(precision_list, recall_list)
+        PR_curve_save_path = os.path.join(self.results_dir, "PR_curve.png")
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 1])
+        ax.grid(True)
+        ax.set_xlabel("Recall")
+        ax.set_ylabel("Precision")
+        ax.set_title("Precision-Recall curve")
+        fig.savefig(PR_curve_save_path, dpi=150)
+    
+    def apply_margin(self):
+        """
+        This function removes all GT and predicted points from self.metadata and self.predictions which fall into the restricted margin.
+        The restricted margin is specified with the self.eval_margin_size parameter, which is typically half of the fake bounding box size, and is used
+        to remove truncated vehicles (both GT and predicted).
+        """
+        for global_counter, (gt_data, pred_data) in enumerate(zip(self.metadata, self.predictions)):
+            assert gt_data['image_id'] == pred_data['image_id'], "GT and prediction image ID-s are different!"
+            new_gt_data = {}
+            new_pred_data = {}
+
+            # Clean the GT data
+            gt_valid_idxs = []
+            for idx, annotation in enumerate(gt_data['annotations']):
+                gt_bbox = annotation['bbox']
+                gt_point = np.array([0.5 * (gt_bbox[0] + gt_bbox[2]), 0.5 * (gt_bbox[1] + gt_bbox[3])])
+                if self.eval_margin_size < gt_point[0] < gt_data['width'] - self.eval_margin_size and self.eval_margin_size < gt_point[1] < gt_data['height'] - self.eval_margin_size:
+                    gt_valid_idxs.append(idx)
+            for k, v in gt_data.items():
+                if k != 'annotations':
+                    new_gt_data[k] = v
+                else:
+                    new_gt_data[k] = []
+                    for idx in gt_valid_idxs:
+                        new_gt_data[k].append(gt_data[k][idx])
+
+            # Clean the predictions
+            pred_valid_idxs = []
+            for idx, instance in enumerate(pred_data['instances']):
+                pred_bbox = instance['bbox']
+                pred_point = np.array([pred_bbox[0] + 0.5 * pred_bbox[2], pred_bbox[1] + 0.5 * pred_bbox[3]])
+                if self.eval_margin_size < pred_point[0] < gt_data['width'] - self.eval_margin_size and self.eval_margin_size < pred_point[1] < gt_data['height'] - self.eval_margin_size:
+                    pred_valid_idxs.append(idx)
+            for k, v in pred_data.items():
+                if k != 'instances':
+                    new_pred_data[k] = v
+                else:
+                    new_pred_data[k] = []
+                    for idx in pred_valid_idxs:
+                        new_pred_data[k].append(pred_data[k][idx])
         
-        # Clean the GT data
-        gt_valid_idxs = []
-        for idx, annotation in enumerate(gt_data['annotations']):
-            gt_bbox = annotation['bbox']
-            gt_point = np.array([0.5 * (gt_bbox[0] + gt_bbox[2]), 0.5 * (gt_bbox[1] + gt_bbox[3])])
-            if self.eval_margin_size < gt_point[0] < gt_data['width'] - self.eval_margin_size and self.eval_margin_size < gt_point[1] < gt_data['height'] - self.eval_margin_size:
-                gt_valid_idxs.append(idx)
-        for k, v in gt_data.items():
-            if k != 'annotations':
-                new_gt_data[k] = v
-            else:
-                new_gt_data[k] = []
-                for idx in gt_valid_idxs:
-                    new_gt_data[k].append(gt_data[k][idx])
-        
-        # Clean the predictions
-        pred_valid_idxs = []
-        for idx, instance in enumerate(pred_data['instances']):
-            pred_bbox = instance['bbox']
-            pred_point = np.array([pred_bbox[0] + 0.5 * pred_bbox[2], pred_bbox[1] + 0.5 * pred_bbox[3]])
-            if self.eval_margin_size < pred_point[0] < gt_data['width'] - self.eval_margin_size and self.eval_margin_size < pred_point[1] < gt_data['height'] - self.eval_margin_size:
-                pred_valid_idxs.append(idx)
-        for k, v in pred_data.items():
-            if k != 'instances':
-                new_pred_data[k] = v
-            else:
-                new_pred_data[k] = []
-                for idx in pred_valid_idxs:
-                    new_pred_data[k].append(pred_data[k][idx])
-        
-        return new_gt_data, new_pred_data
+            # Save the clean GT and predictions
+            self.metadata[global_counter] = new_gt_data
+            self.predictions[global_counter] = new_pred_data
