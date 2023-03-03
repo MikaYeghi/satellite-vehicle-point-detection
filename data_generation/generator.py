@@ -102,7 +102,7 @@ class Generator:
         step_dw = self.cfg['MULTIVEHICLE']['MATRIX']['WIDTH_SHIFT']
         step_dh = self.cfg['MULTIVEHICLE']['MATRIX']['HEIGHT_SHIFT']
         
-        # For centering the matrix
+        # For centering the matrix before moving it
         center_shift_dx = (matrix_width - 1) * step_dw / 2
         center_shift_dz = (matrix_height - 1) * step_dh / 2
         
@@ -111,7 +111,7 @@ class Generator:
         matrix_shift_dz = random.uniform(-1, 1)
         
         # Random rotation
-        matrix_rotation = euler_angles_to_matrix(torch.tensor([0, random.uniform(0, 2 * math.pi), 0]), convention="XYZ").to(self.device)
+        meshes_rotation = euler_angles_to_matrix(torch.tensor([0, random.uniform(0, 2 * math.pi), 0]), convention="XYZ").to(self.device)
         
         offsets = []
         assert len(meshes) == matrix_height * matrix_width
@@ -133,7 +133,7 @@ class Generator:
                 mesh_dz /= scaling_factor
 
                 # Apply rotation
-                mesh_rotation = torch.matmul(matrix_rotation, mesh.verts_packed().data.T).T - mesh.verts_packed()
+                mesh_rotation = torch.matmul(meshes_rotation, mesh.verts_packed().data.T).T - mesh.verts_packed()
                 mesh.offset_verts_(vert_offsets_packed=mesh_rotation)
                 
                 # Center the mesh before applying translation
@@ -463,13 +463,18 @@ class Generator:
                     meshes_batch_list[i][j] = meshes_batch_list[i][j].to(self.device)
             
             # Sample rendering parameters
-            distances = [5.0 for _ in range(batch_size)]
-            elevations = [90 for _ in range(batch_size)]
-            azimuths = [0 for _ in range(batch_size)]
+            distance = self.cfg['RENDERING']['DISTANCE']
+            elevation = self.cfg['RENDERING']['ELEVATION']
+            azimuth = self.cfg['RENDERING']['AZIMUTH']
+            sf_range = self.cfg['RENDERING']['SCALING_FACTORS_RANGE']
+            int_range = self.cfg['RENDERING']['INTENSITIES_RANGE']
+            distances = [distance for _ in range(batch_size)]
+            elevations = [elevation for _ in range(batch_size)]
+            azimuths = [azimuth for _ in range(batch_size)]
             lights_directions = torch.rand(batch_size, 3, device=self.device) * 2 - 1
             lights_directions[:, 1] = -1
-            scaling_factors = torch.rand(batch_size, 1, device=self.device) * (0.06 - 0.04) + 0.04
-            intensities = torch.rand(batch_size, 1, device=self.device) * (2 - 0.5) + 0.5
+            scaling_factors = torch.rand(batch_size, 1, device=self.device) * (sf_range[1] - sf_range[0]) + sf_range[0]
+            intensities = torch.rand(batch_size, 1, device=self.device) * (int_range[1] - int_range[0]) + int_range[0]
             
             # Randomly place the vehicles in each image
             meshes, offsets = self.randomly_place_meshes_multi(meshes_batch_list, scaling_factors, distances, elevations, azimuths, intensities, matrix_info)
