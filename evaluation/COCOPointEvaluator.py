@@ -22,12 +22,13 @@ class COCOPointEvaluator(DatasetEvaluator):
         distributed=True,
         output_dir=None,
         plot_results=False,
+        FP_FN_analysis=True,
+        eval_margin_size=6,
         *,
         max_dets_per_image=None,
         use_fast_impl=True,
         kpt_oks_sigmas=(),
         allow_cached_coco=True,
-        FP_FN_analysis=False
     ):
         # Settings
         self.logger = logger
@@ -46,6 +47,7 @@ class COCOPointEvaluator(DatasetEvaluator):
         self.predictions = []
         self.metadata = DatasetCatalog.get(dataset_name)
         self.FP_FN_analysis = FP_FN_analysis
+        self.eval_margin_size = eval_margin_size # Predictions and GT-s that are close to the image border are discarded
     
     def reset(self):
         self.predictions = []
@@ -102,6 +104,10 @@ class COCOPointEvaluator(DatasetEvaluator):
         for i in range(len(self.metadata)):
             gt_data = self.metadata[i]
             pred_data = self.predictions[i]
+            
+            # Apply the margin to remove truncated samples
+            gt_data, pred_data = self.apply_margin(gt_data, pred_data)
+            
             assert gt_data['image_id'] == pred_data['image_id']
             n_preds = len(pred_data['instances'])
             
@@ -217,9 +223,17 @@ class COCOPointEvaluator(DatasetEvaluator):
         if self.FP_FN_analysis:
             # Sort the list of FNs by the FN ratio
             image_counter = 0
+            
+            # Sort the images by the number of FNs in a decreasing order
             FN_list = sorted(FN_list, key=lambda d: d['FN_count'], reverse=True)
+            
+            # Plot the results
             for image_info in FN_list:
                 image = Image.open(image_info['file_name']).convert('RGB')
+                
+                # Stop plotting if there're no images left with FNs
+                if len(image_info['FN_idxs']) == 0:
+                    break
                 
                 # Plot the original image
                 fig, ax = plt.subplots()
@@ -303,3 +317,39 @@ class COCOPointEvaluator(DatasetEvaluator):
             # Clear plt
             del fig, ax
             plt.close()
+    
+    def apply_margin(self, gt_data, pred_data):
+        new_gt_data = {}
+        new_pred_data = {}
+        
+        # Clean the GT data
+        gt_valid_idxs = []
+        for idx, annotation in enumerate(gt_data['annotations']):
+            gt_bbox = annotation['bbox']
+            gt_point = np.array([0.5 * (gt_bbox[0] + gt_bbox[2]), 0.5 * (gt_bbox[1] + gt_bbox[3])])
+            if self.eval_margin_size < gt_point[0] < gt_data['width'] - self.eval_margin_size and self.eval_margin_size < gt_point[1] < gt_data['height'] - self.eval_margin_size:
+                gt_valid_idxs.append(idx)
+        for k, v in gt_data.items():
+            if k != 'annotations':
+                new_gt_data[k] = v
+            else:
+                new_gt_data[k] = []
+                for idx in gt_valid_idxs:
+                    new_gt_data[k].append(gt_data[k][idx])
+        
+        # Clean the predictions
+        pred_valid_idxs = []
+        for idx, instance in enumerate(pred_data['instances']):
+            pred_bbox = instance['bbox']
+            pred_point = np.array([pred_bbox[0] + 0.5 * pred_bbox[2], pred_bbox[1] + 0.5 * pred_bbox[3]])
+            if self.eval_margin_size < pred_point[0] < gt_data['width'] - self.eval_margin_size and self.eval_margin_size < pred_point[1] < gt_data['height'] - self.eval_margin_size:
+                pred_valid_idxs.append(idx)
+        for k, v in pred_data.items():
+            if k != 'instances':
+                new_pred_data[k] = v
+            else:
+                new_pred_data[k] = []
+                for idx in pred_valid_idxs:
+                    new_pred_data[k].append(pred_data[k][idx])
+        
+        return new_gt_data, new_pred_data
