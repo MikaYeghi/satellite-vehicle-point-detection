@@ -102,7 +102,7 @@ class Generator:
         step_dw = self.cfg['MULTIVEHICLE']['MATRIX']['WIDTH_SHIFT']
         step_dh = self.cfg['MULTIVEHICLE']['MATRIX']['HEIGHT_SHIFT']
         
-        # For centering the matrix before moving it
+        # Center the matrix before applying translation to it
         center_shift_dx = (matrix_width - 1) * step_dw / 2
         center_shift_dz = (matrix_height - 1) * step_dh / 2
         
@@ -110,8 +110,13 @@ class Generator:
         matrix_shift_dx = random.uniform(-1, 1)
         matrix_shift_dz = random.uniform(-1, 1)
         
-        # Random rotation
-        meshes_rotation = euler_angles_to_matrix(torch.tensor([0, random.uniform(0, 2 * math.pi), 0]), convention="XYZ").to(self.device)
+        # Random rotation (applied to the entire matrix)
+        matrix_rotation = random.uniform(0, 2 * math.pi)
+        rotation_cos = math.cos(matrix_rotation)
+        rotation_sin = math.sin(matrix_rotation)
+        
+        # Random rotation applied to each vehicle (uniform across all vehicles)
+        meshes_rotation = euler_angles_to_matrix(torch.tensor([0, random.uniform(0, -matrix_rotation + 2 * math.pi), 0]), convention="XYZ").to(self.device)
         
         offsets = []
         assert len(meshes) == matrix_height * matrix_width
@@ -123,8 +128,20 @@ class Generator:
                 mesh = meshes[k]
                 
                 # Get dx and dz
-                mesh_dx = j * step_dw - center_shift_dx + matrix_shift_dx
-                mesh_dz = i * step_dh - center_shift_dz + matrix_shift_dz
+                mesh_dx = j * step_dw - center_shift_dx
+                mesh_dz = i * step_dh - center_shift_dz
+                
+                # Get the original location of the mesh
+                mesh_dx_original = 0 + mesh_dx
+                mesh_dz_original = 0 + mesh_dz
+                
+                # Apply rotation to the matrix
+                mesh_dx = mesh_dx_original * rotation_cos - mesh_dz_original * rotation_sin
+                mesh_dz = mesh_dz_original * rotation_cos + mesh_dx_original * rotation_sin
+                
+                # Apply translation to the matrix
+                mesh_dx += matrix_shift_dx
+                mesh_dz += matrix_shift_dz
                 
                 # Compute the offset
                 offset = np.array([-mesh_dx, -mesh_dz]) # To be in the (x, y) format on the image
@@ -132,7 +149,7 @@ class Generator:
                 mesh_dx /= scaling_factor
                 mesh_dz /= scaling_factor
 
-                # Apply rotation
+                # Apply mesh rotation
                 mesh_rotation = torch.matmul(meshes_rotation, mesh.verts_packed().data.T).T - mesh.verts_packed()
                 mesh.offset_verts_(vert_offsets_packed=mesh_rotation)
                 
