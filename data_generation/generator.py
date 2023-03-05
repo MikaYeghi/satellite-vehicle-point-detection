@@ -10,11 +10,12 @@ from tqdm import tqdm
 from pathlib import Path
 from random import shuffle
 from functools import reduce
-from torch.utils.data import DataLoader
 from torchvision import transforms
+from torch.utils.data import DataLoader
 from pytorch3d.io import load_objs_as_meshes
 from pytorch3d.structures import join_meshes_as_scene
 from pytorch3d.transforms import euler_angles_to_matrix
+from torch.utils.data.distributed import DistributedSampler
 from pytorch3d.renderer import RasterizationSettings, MeshRasterizer, MeshRenderer, SoftSilhouetteShader, FoVOrthographicCameras, look_at_view_transform
 
 from rendering.renderer import Renderer
@@ -27,12 +28,14 @@ logger = get_logger("Data generator logger")
 import pdb
 
 class Generator:
-    def __init__(self, cfg, image_size=384, device='cpu'):
+    def __init__(self, cfg, rank, world_size, image_size=384, device='cpu'):
         self.cfg = cfg
         self.image_size = image_size
         self.tensor_to_pil = transforms.ToPILImage()
         self.renderer = Renderer(device)
         self.device = device
+        self.rank = rank
+        self.world_size = world_size
         
         # Load the meshes, already split into train/val/test meshes
         self.meshes = self.load_trainvaltest_meshes(cfg['MESHES_DIR'], cfg['MESHES_TRAINVALTEST_SPLIT'])
@@ -307,25 +310,8 @@ class Generator:
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "images")).mkdir(parents=True, exist_ok=True)
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "annotations")).mkdir(parents=True, exist_ok=True)
         
-        # Initialize the dataset
-        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
-        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
-        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
-        
-        # Retain required number of images
-        if self.cfg['NUM_IMAGES']['ENABLE']:
-            # Retain only a subset of the original datasets
-            train_set.retain_n_images(self.cfg['NUM_IMAGES']['TRAIN'])
-            val_set.retain_n_images(self.cfg['NUM_IMAGES']['VALIDATION'])
-            test_set.retain_n_images(self.cfg['NUM_IMAGES']['TEST'])
-        
-        # Initialize the dataloaders
-        logger.info("Initializing the train loader")
-        train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'])
-        logger.info("Initializing the validation loader")
-        val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'])
-        logger.info("Initializing the test loader")
-        test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'])
+        # Get the dataloaders
+        train_loader, val_loader, test_loader = self.prepare_dataloaders()
         
         # Generate train/val/test sets
         self.generate_set_single("train", train_loader)
@@ -413,26 +399,9 @@ class Generator:
         Path(os.path.join(self.cfg['SAVE_DIR'], "validation", "annotations")).mkdir(parents=True, exist_ok=True)
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "images")).mkdir(parents=True, exist_ok=True)
         Path(os.path.join(self.cfg['SAVE_DIR'], "test", "annotations")).mkdir(parents=True, exist_ok=True)
-
-        # Initialize the dataset
-        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
-        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
-        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
         
-        # Retain required number of images
-        if self.cfg['NUM_IMAGES']['ENABLE']:
-            # Retain only a subset of the original datasets
-            train_set.retain_n_images(self.cfg['NUM_IMAGES']['TRAIN'])
-            val_set.retain_n_images(self.cfg['NUM_IMAGES']['VALIDATION'])
-            test_set.retain_n_images(self.cfg['NUM_IMAGES']['TEST'])
-        
-        # Initialize the dataloaders
-        logger.info("Initializing the train loader")
-        train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'])
-        logger.info("Initializing the validation loader")
-        val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'])
-        logger.info("Initializing the test loader")
-        test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'])
+        # Get the dataloaders
+        train_loader, val_loader, test_loader = self.prepare_dataloaders()
 
         # Generate train/val/test sets
         self.generate_set_multi("train", train_loader)
@@ -526,11 +495,11 @@ class Generator:
             for k in range(batch_size):
                 # Image
                 synthetic_image = synthetic_images[k]
-                image_save_path = os.path.join(save_dir, "images", f"image_{image_counter}_{k}.jpg")
+                image_save_path = os.path.join(save_dir, "images", f"image_{self.rank}_{image_counter}_{k}.jpg")
                 self.tensor_to_pil(synthetic_image).save(image_save_path, quality=95)
             
                 # Annotations
-                anns_save_path = os.path.join(save_dir, "annotations", f"image_{image_counter}_{k}.pkl")
+                anns_save_path = os.path.join(save_dir, "annotations", f"image_{self.rank}_{image_counter}_{k}.pkl")
                 with open(anns_save_path, 'wb') as f:
                     pickle.dump(annotations[k], f, protocol=pickle.HIGHEST_PROTOCOL)
                 
@@ -553,3 +522,31 @@ class Generator:
             raise NotImplementedError
         
         return n_vehicles_list
+    
+    def prepare_dataloaders(self, pin_memory=False, num_workers=0):
+        # Initialize the dataset
+        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
+        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
+        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
+        
+        # Retain required number of images
+        if self.cfg['NUM_IMAGES']['ENABLE']:
+            # Retain only a subset of the original datasets
+            train_set.retain_n_images(self.cfg['NUM_IMAGES']['TRAIN'])
+            val_set.retain_n_images(self.cfg['NUM_IMAGES']['VALIDATION'])
+            test_set.retain_n_images(self.cfg['NUM_IMAGES']['TEST'])
+        
+        # Initialize the samplers
+        train_sampler = DistributedSampler(train_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
+        val_sampler = DistributedSampler(val_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
+        test_sampler = DistributedSampler(test_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
+        
+        # Initialize the dataloaders
+        logger.info("Initializing the train loader")
+        train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, shuffle=self.cfg['SHUFFLE'], sampler=train_sampler)
+        logger.info("Initializing the validation loader")
+        val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, shuffle=self.cfg['SHUFFLE'], sampler=val_sampler)
+        logger.info("Initializing the test loader")
+        test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, shuffle=self.cfg['SHUFFLE'], sampler=test_sampler)
+        
+        return (train_loader, val_loader, test_loader)
