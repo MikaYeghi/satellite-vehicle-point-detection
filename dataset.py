@@ -18,9 +18,8 @@ from detectron2.data import MetadataCatalog, DatasetCatalog
 import time
 import pdb
 
-def register_LINZ(data_path, mode, debug_on=False):
+def register_dataset(data_path, debug_on=False):
     data_path = copy.deepcopy(data_path)
-    data_path = os.path.join(data_path, mode)
     annotations_dir = os.path.join(data_path, "annotations")    # full path to the annotations directory
     images_dir = os.path.join(data_path, "images")              # full path to the images directory
     
@@ -68,10 +67,23 @@ def register_LINZ(data_path, mode, debug_on=False):
     
     return dataset_dicts
 
-def setup_dataset(data_path, debug_on=False):
-    for mode in ["train", "validation", "test"]:
+def setup_dataset(cfg, datasets_dir, debug_on=False):    
+    # Register train datasets
+    for train_set_name in cfg.DATASETS.TRAIN:
+        dataset_path = os.path.join(datasets_dir, train_set_name)
+        
         # Register the dataset
-        DatasetCatalog.register("LINZ_" + mode, lambda mode_=mode : register_LINZ(data_path, mode_, debug_on))
+        DatasetCatalog.register(train_set_name, lambda data_path=dataset_path : register_dataset(data_path, debug_on))
         
         # Update the metadata
-        MetadataCatalog.get("LINZ_" + mode).set(thing_classes=["vehicle"], evaluator_type="coco_point")
+        MetadataCatalog.get(train_set_name).set(thing_classes=["vehicle"], evaluator_type="coco_point")
+    
+    # Register test datasets
+    for test_set_name in cfg.DATASETS.TEST:
+        dataset_path = os.path.join(datasets_dir, test_set_name)
+        
+        # Register the dataset
+        DatasetCatalog.register(test_set_name, lambda data_path=dataset_path : register_dataset(data_path, debug_on))
+        
+        # Update the metadata
+        MetadataCatalog.get(test_set_name).set(thing_classes=["vehicle"], evaluator_type="coco_point")
