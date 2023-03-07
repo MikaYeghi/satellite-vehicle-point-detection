@@ -525,9 +525,9 @@ class Generator:
     
     def prepare_dataloaders(self, pin_memory=False, num_workers=0):
         # Initialize the dataset
-        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"))
-        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"))
-        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"))
+        train_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "train"), device=self.device)
+        val_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "validation"), device=self.device)
+        test_set = GeneratorDataset(os.path.join(self.cfg['DATA_DIR'], "test"), device=self.device)
         
         # Retain required number of images
         if self.cfg['NUM_IMAGES']['ENABLE']:
@@ -543,10 +543,10 @@ class Generator:
         
         # Initialize the dataloaders
         logger.info("Initializing the train loader")
-        train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, shuffle=self.cfg['SHUFFLE'], sampler=train_sampler)
+        train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=train_sampler)
         logger.info("Initializing the validation loader")
-        val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, shuffle=self.cfg['SHUFFLE'], sampler=val_sampler)
+        val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=val_sampler)
         logger.info("Initializing the test loader")
-        test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, shuffle=self.cfg['SHUFFLE'], sampler=test_sampler)
+        test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=test_sampler)
         
         return (train_loader, val_loader, test_loader)
