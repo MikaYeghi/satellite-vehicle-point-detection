@@ -536,17 +536,26 @@ class Generator:
             val_set.retain_n_images(self.cfg['NUM_IMAGES']['VALIDATION'])
             test_set.retain_n_images(self.cfg['NUM_IMAGES']['TEST'])
         
-        # Initialize the samplers
-        train_sampler = DistributedSampler(train_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
-        val_sampler = DistributedSampler(val_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
-        test_sampler = DistributedSampler(test_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
-        
-        # Initialize the dataloaders
-        logger.info("Initializing the train loader")
-        train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=train_sampler)
-        logger.info("Initializing the validation loader")
-        val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=val_sampler)
-        logger.info("Initializing the test loader")
-        test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=test_sampler)
+        if self.cfg['NUM_GPUS'] == 1:
+            # Initialize the dataloaders
+            logger.info("Initializing the train loader")
+            train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'])
+            logger.info("Initializing the validation loader")
+            val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'])
+            logger.info("Initializing the test loader")
+            test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'])
+        else:
+            # Initialize the samplers
+            train_sampler = DistributedSampler(train_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
+            val_sampler = DistributedSampler(val_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
+            test_sampler = DistributedSampler(test_set, num_replicas=self.world_size, rank=self.rank, shuffle=self.cfg['SHUFFLE'], drop_last=False)
+
+            # Initialize the dataloaders
+            logger.info("Initializing the train loader")
+            train_loader = DataLoader(train_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=train_sampler)
+            logger.info("Initializing the validation loader")
+            val_loader = DataLoader(val_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=val_sampler)
+            logger.info("Initializing the test loader")
+            test_loader = DataLoader(test_set, batch_size=self.cfg['BATCH_SIZE'], pin_memory=pin_memory, num_workers=num_workers, drop_last=False, sampler=test_sampler)
         
         return (train_loader, val_loader, test_loader)

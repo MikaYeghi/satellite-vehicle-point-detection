@@ -1,5 +1,6 @@
 import os
 import glob
+import torch
 import random
 import pickle
 from PIL import Image
@@ -12,6 +13,18 @@ from logger import get_logger
 logger = get_logger("GeneratorDataset logger")
 
 import pdb
+
+def collate_fn(data):
+    # Construct the images tensor
+    images_batch = torch.stack([data_[0] for data_ in data])
+    
+    # Construct the annotations list
+    annotations_batch = [data_[1] for data_ in data]
+    
+    # Check compatibility
+    assert images_batch.shape[0] == len(annotations_batch)
+    
+    return (images_batch, annotations_batch)
 
 class GeneratorDataset(Dataset):
     def __init__(self, data_dir, device='cpu'):
@@ -59,7 +72,7 @@ class GeneratorDataset(Dataset):
             del annotations['unknown'] # delete the unknown vehicles from the dataset
             
             # If image is not empty -- skip it.
-            if any([x.shape[0] > 0 for x in annotations.values()]):
+            if any([v.shape[0] > 0 and k != 'slots' for k, v in annotations.items()]):
                 continue
             
             metadata_ = {
@@ -97,4 +110,21 @@ class GeneratorDataset(Dataset):
         image = image.to(self.device)
         
         return image
+    
+class ParkingDataset(GeneratorDataset):
+    def __init__(self, data_dir, device='cpu'):
+        super(ParkingDataset, self).__init__(data_dir, device=device)
+    
+    def __getitem__(self, idx):
+        data = self.metadata[idx]
+        image_path = data['image_path']
+        annotations = data['annotations']
         
+        # Load the image
+        image = Image.open(image_path)
+        image = self.transform(image)
+        
+        # Move to the device
+        image = image.to(self.device)
+        
+        return image, annotations
