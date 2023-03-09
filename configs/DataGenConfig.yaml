@@ -1,5 +1,5 @@
-DATA_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Real-384px-0.25m"
-# DATA_DIR: "/home/myeghiaz/Storage/Detection/parking-lots/SatDet-Parking-384px-0.25m"
+# DATA_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Real-384px-0.25m"
+DATA_DIR: "/home/myeghiaz/Storage/Detection/parking-lots/SatDet-Parking-384px-0.25m"
 SAVE_DIR: "/home/myeghiaz/Storage/Detection/SatDet-Synthetic-384px-0.25m-multi-1.4-proba"
 MESHES_DIR: "/home/myeghiaz/Storage/GAN-vehicles"
 GENERATOR: parking

@@ -72,7 +72,7 @@ class GeneratorDataset(Dataset):
             del annotations['unknown'] # delete the unknown vehicles from the dataset
             
             # If image is not empty -- skip it.
-            if any([v.shape[0] > 0 and k != 'slots' for k, v in annotations.items()]):
+            if any([v.shape[0] > 0 for k, v in annotations.items()]):
                 continue
             
             metadata_ = {
@@ -128,3 +128,49 @@ class ParkingDataset(GeneratorDataset):
         image = image.to(self.device)
         
         return image, annotations
+    
+    def extract_metadata(self, data_dir):
+        """
+        This method extract metadata which described the detection dataset.
+        
+        Expecting the dataset should have the following structure:
+        └── data_dir
+            ├── annotations
+            ├── images
+        Each image in the "images" directory has an analogous annotation file in the "annotations" directory.
+        For example: image_1234.jpg <-> image_1234.pkl.
+        """
+        metadata = []
+        images_dir = os.path.join(data_dir, "images")
+        annotations_dir = os.path.join(data_dir, "annotations")
+        
+        # Load the images and annotations list
+        images_list = []
+        formats_list = ['jpg', 'png']
+        for image_format in formats_list:
+            images_list += glob.glob(images_dir + f"/*.{image_format}")
+        annotations_list = glob.glob(annotations_dir + "/*.pkl")
+        if len(images_list) != len(annotations_list): logger.warning("Different number of images and annotation files!")
+        
+        # Load the metadata
+        for image_path in tqdm(images_list):
+            # Get the annotation file path
+            file_code = image_path.split('/')[-1].split('.')[0]
+            annotation_path = os.path.join(annotations_dir, f"{file_code}.pkl")
+            
+            with open(annotation_path, 'rb') as f:
+                annotations = pickle.load(f)
+            del annotations['unknown'] # delete the unknown vehicles from the dataset
+            
+            # If image is not empty -- skip it.
+            if any([v.shape[0] > 0 and k != "slots" for k, v in annotations.items()]):
+                continue
+            
+            metadata_ = {
+                "image_path": image_path,
+                "annotations": annotations
+            }
+            
+            metadata.append(metadata_)
+        
+        return metadata
