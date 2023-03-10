@@ -26,11 +26,11 @@ class ParkingGenerator(Generator):
         assert set_type in ['train', 'validation', 'test'], "Set type must be one of train/val/test!"
         data_dir = os.path.join(self.cfg['DATA_DIR'], set_type)
         save_dir = os.path.join(self.cfg['SAVE_DIR'], set_type)
-        image_counter = 0
+        images_batch_counter = 0
         logger.info(f"Generating {set_type} dataset")
         
         # Populate images with rendered vehicles
-        for images_batch, annotations_batch in tqdm(dataloader):
+        for images_batch, annotations_batch in dataloader:
             batch_size = len(images_batch)
             
             # No matrices in the parking lot scenario
@@ -51,10 +51,11 @@ class ParkingGenerator(Generator):
             intensities = torch.rand(batch_size, 1, device=self.device) * (int_range[1] - int_range[0]) + int_range[0]
             
             # Generate all possible scenarios for the given parking lot image
+            image_counter = 0
             for image, annotations, scaling_factor in zip(images_batch, annotations_batch, scaling_factors):
-                meshes_list, offsets_list = self.populate_parking_lot(annotations, set_type, scaling_factor)
-                assert len(meshes_list) == len(offsets_list)
-            
+                offsets_list, angles_list = self.populate_parking_lot(annotations, scaling_factor)
+                assert len(offsets_list) == len(angles_list)
+                
                 # Convert offsets to locations
                 locations_list = []
                 for offsets in offsets_list:
@@ -64,13 +65,31 @@ class ParkingGenerator(Generator):
                 anns_list = self.construct_annotations_files(locations_list)
         
                 # Render images in batches
-                batched_meshes_list = [meshes_list[x:x + self.cfg['BATCH_SIZE']] for x in range(0, len(meshes_list), self.cfg['BATCH_SIZE'])]
-                batched_anns_list = [anns_list[x:x + self.cfg['BATCH_SIZE']] for x in range(0, len(anns_list), self.cfg['BATCH_SIZE'])]
+                batched_offsets_list = [offsets_list[x:x + batch_size] for x in range(0, len(offsets_list), batch_size)]
+                batched_angles_list = [angles_list[x:x + batch_size] for x in range(0, len(angles_list), batch_size)]
+                batched_anns_list = [anns_list[x:x + batch_size] for x in range(0, len(anns_list), batch_size)]
                 batch_counter = 0
-                for meshes_joined, anns_joined in zip(batched_meshes_list, batched_anns_list):
-                    logger.debug(f"Batch counter: {batch_counter}")
-                    assert len(meshes_joined) == len(anns_joined)
-                    bsz = len(meshes_joined)
+                for offsets_joined, angles_joined, anns_joined in zip(batched_offsets_list, batched_angles_list, batched_anns_list):
+                    assert len(offsets_joined) == len(angles_joined) == len(anns_joined)
+                    bsz = len(offsets_joined)
+                    
+                    # Load the meshes
+                    meshes_joined = []
+                    for i in range(bsz):
+                        assert offsets_joined[i].shape[0] == angles_joined[i].shape[0]
+                        
+                        # Sample the required number of meshes for the current scenario
+                        meshes = random.choices(self.meshes[set_type], k=offsets_joined[i].shape[0])
+                        
+                        # Place the meshes in the corresponding locations for the current scenario
+                        meshes = self.move_and_rotate_meshes(meshes, offsets_joined[i], angles_joined[i], scaling_factor)
+                        
+                        # Join the meshes into a scene
+                        meshes = join_meshes_as_scene(meshes)
+                        
+                        # Append to the batch of meshes
+                        meshes_joined.append(meshes)
+                    
                     
                     # Move the meshes to the device
                     meshes_joined = [mesh.to(self.device) for mesh in meshes_joined]
@@ -92,23 +111,25 @@ class ParkingGenerator(Generator):
                     for k in range(len(anns_joined)):
                         # Image
                         synthetic_image = synthetic_images[k]
-                        image_save_path = os.path.join(save_dir, "images", f"image_{self.rank}_{batch_counter}_{image_counter}_{k}.jpg")
+                        image_save_path = os.path.join(save_dir, "images", f"image_{self.rank}_{images_batch_counter}_{image_counter}_{batch_counter}_{k}.jpg")
                         self.tensor_to_pil(synthetic_image).save(image_save_path, quality=95)
 
                         # Annotations
-                        anns_save_path = os.path.join(save_dir, "annotations", f"image_{self.rank}_{batch_counter}_{image_counter}_{k}.pkl")
+                        anns_save_path = os.path.join(save_dir, "annotations", f"image_{self.rank}_{images_batch_counter}_{image_counter}_{batch_counter}_{k}.pkl")
                         with open(anns_save_path, 'wb') as f:
                             pickle.dump(anns_joined[k], f, protocol=pickle.HIGHEST_PROTOCOL)
                             
                     batch_counter += 1
                 
-            image_counter += 1
+                image_counter += 1
+            
+            images_batch_counter += 1
     
-    def populate_parking_lot(self, annotations, set_type, scaling_factor):
+    def populate_parking_lot(self, annotations, scaling_factor):
         assert 'slots' in annotations.keys(), "Slots key missing in the parking lot annotations dictionary!"
         
-        # Lists holding meshes and offsets
-        parked_meshes = []
+        # Lists holding mesh offsets and angles
+        parked_angles = []
         parked_offsets = []
         
         # Extract image height and width
@@ -121,10 +142,6 @@ class ParkingGenerator(Generator):
         for parking_scenario in parking_scenarios:
             parking_locations = annotations['slots'][[parking_scenario]][0]
             
-            # Sample the required number of meshes
-            n_meshes = parking_locations.shape[0]
-            meshes = random.choices(self.meshes[set_type], k=n_meshes)
-            
             # Convert locations to offsets
             parking_offsets = np.empty(shape=(0, 2))
             parking_angles = np.array([parking_location[2] for parking_location in parking_locations])
@@ -135,16 +152,13 @@ class ParkingGenerator(Generator):
                     np.expand_dims(np.array([-1 + 2 * parking_location[0] / width, -1 + 2 * parking_location[1] / height]), 0)
                 ))
             
-            # Move and rotate the meshes to the specified locations in the image
-            meshes = self.move_and_rotate_meshes(meshes, parking_offsets, parking_angles, scaling_factor)
-            
             # Join meshes as a scene
-            parked_meshes.append(join_meshes_as_scene(meshes))
+            parked_angles.append(parking_angles)
             parked_offsets.append(parking_offsets)
         
-        return parked_meshes, parked_offsets
+        return parked_offsets, parked_angles
     
-    def compute_all_parking_scenarios(self, n_slots):
+    def compute_all_parking_scenarios(self, n_slots, n_scens_max=10, n_slots_max=8):
         """
         Given the total number of parking slots available, this function returns indices of occupied parking slots for every single possible scenario of occupancy of
         the parking lot.
@@ -156,18 +170,24 @@ class ParkingGenerator(Generator):
         """
         scenarios_list = []
         indices = list(range(n_slots))
+        if len(indices) > n_slots_max:
+            indices = random.sample(indices, n_slots_max)
         for L in range(len(indices) + 1):
             for scenario in itertools.combinations(indices, L):
                 if len(scenario) > 0:
                     scenarios_list.append(scenario)
         
+        if len(scenarios_list) > n_scens_max:
+            scenarios_list = random.sample(scenarios_list, n_scens_max)
+        
         return scenarios_list
     
-    def move_and_rotate_meshes(self, meshes, offsets, angles, scaling_factor):
-        assert len(meshes) == offsets.shape[0] == angles.shape[0]
+    def move_and_rotate_meshes(self, meshes_original, offsets, angles, scaling_factor):
+        assert len(meshes_original) == offsets.shape[0] == angles.shape[0]
+        meshes = [mesh.clone() for mesh in meshes_original]
         for mesh, offset, angle in zip(meshes, offsets, angles):
             # Apply rotation
-            mesh_rotation = euler_angles_to_matrix(torch.tensor([0, angle, 0]), convention="XYZ")
+            mesh_rotation = euler_angles_to_matrix(torch.tensor([0, -angle, 0]), convention="XYZ")
             mesh_rotation = torch.matmul(mesh_rotation.float(), mesh.verts_packed().data.T).T - mesh.verts_packed()
             mesh.offset_verts_(vert_offsets_packed=mesh_rotation)
 
