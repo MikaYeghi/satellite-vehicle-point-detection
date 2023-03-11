@@ -138,7 +138,7 @@ class ParkingGenerator(Generator):
         
         # Extract the total number of slots
         n_slots = annotations['slots'].shape[0]
-        parking_scenarios = self.compute_all_parking_scenarios(n_slots)
+        parking_scenarios = self.compute_all_parking_scenarios(n_slots, n_scenarios=self.cfg['PARKING']['N_SCENARIOS_PER_IMAGE'])
         for parking_scenario in parking_scenarios:
             parking_locations = annotations['slots'][[parking_scenario]][0]
             
@@ -158,7 +158,7 @@ class ParkingGenerator(Generator):
         
         return parked_offsets, parked_angles
     
-    def compute_all_parking_scenarios(self, n_slots, n_scens_max=10, n_slots_max=8):
+    def compute_all_parking_scenarios(self, n_slots, n_scenarios=10):
         """
         Given the total number of parking slots available, this function returns indices of occupied parking slots for every single possible scenario of occupancy of
         the parking lot.
@@ -170,15 +170,11 @@ class ParkingGenerator(Generator):
         """
         scenarios_list = []
         indices = list(range(n_slots))
-        if len(indices) > n_slots_max:
-            indices = random.sample(indices, n_slots_max)
-        for L in range(len(indices) + 1):
-            for scenario in itertools.combinations(indices, L):
-                if len(scenario) > 0:
-                    scenarios_list.append(scenario)
         
-        if len(scenarios_list) > n_scens_max:
-            scenarios_list = random.sample(scenarios_list, n_scens_max)
+        for i in range(n_scenarios):
+            n_cars = random.randint(1, n_slots)
+            scenario = tuple(random.sample(indices, k=n_cars))
+            scenarios_list.append(scenario)
         
         return scenarios_list
     
